@@ -1,0 +1,69 @@
+{
+  "project_info": {
+    "project_number": "616124787110",
+    "firebase_url": "https://worship-team-app-ac0eb-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "worship-team-app-ac0eb",
+    "storage_bucket": "worship-team-app-ac0eb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:616124787110:android:4d70e1ebdf30a9a23d0767",
+        "android_client_info": {
+          "package_name": "com.example.worshipteam"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjHiGKiW7736cpQUIf98roKcKHUojXhIk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:616124787110:android:7de801276128905a3d0767",
+        "android_client_info": {
+          "package_name": "com.example.worshipteamapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjHiGKiW7736cpQUIf98roKcKHUojXhIk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

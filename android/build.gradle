@@ -1,0 +1,32 @@
+buildscript {
+    ext.kotlin_version = '1.9.24'  // Latest stable Kotlin (compatible with Gradle 8.1)
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.4'    // Stable Gradle plugin for Flutter
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath 'com.google.gms:google-services:4.4.2'   // Required for Firebase (Auth, Firestore, Storage)
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.buildDir
+}
