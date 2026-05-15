@@ -5,28 +5,32 @@ import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:onesignal_flutter/onesignal_flutter.dart';   // ✅ OneSignal
 import 'auth_screen.dart';
 import 'profile_screen.dart';
 import 'band_library_screen.dart';
+import 'notification_service.dart';   // ✅ Push notification service
 
-// Color Palette
-const Color smokyBlack = Color(0xFF110703);
-const Color licorice = Color(0xFF230F08);
-const Color blackBean = Color(0xFF34170D);
-const Color kobicha = Color(0xFF6E3C19);
-const Color chamoisee = Color(0xFFA7795E);
-const Color highlightSuccess = Color(0xFF558B2F);
-const Color highlightWarning = Color(0xFFD4A017);
-const Color highlightError = Color(0xFFC62828);
-const Color highlightInfo = Color(0xFF5D6D7E);
+// Professional Black/White/Smoke Palette
+const Color primaryBlack = Color(0xFF000000);
+const Color primaryWhite = Color(0xFFFFFFFF);
+const Color smokeGrey = Color(0xFFF5F5F5);
+const Color darkSmoke = Color(0xFF2C2C2C);
+const Color mediumGrey = Color(0xFF757575);
+const Color lightGrey = Color(0xFFBDBDBD);
+const Color almostBlack = Color(0xFF1E1E1E);
 
+// Functional highlights – toned to fit the monochrome theme
+const Color highlightSuccess = Color(0xFF4CAF50);
+const Color highlightWarning = Color(0xFFFFA726);
+const Color highlightError = Color(0xFFEF5350);
+const Color highlightInfo = Color(0xFF78909C);
+
+// ✅ UNIFIED 6 music positions
 const List<String> musicPositions = [
   'Guitar 1 🎸',
-  'Guitar 2 / Rhythm 🎸',
+  'Guitar 2 🎸',
   'Bass 🎸',
+  'Rhythm 🎸',
   'Drums 🥁',
   'Keyboard 🎹',
 ];
@@ -81,6 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Map<String, AssignedMusician>? _monthlyBandAssignment;
   int _monthlyAssignedCount = 0;
+  bool _isMusicianListExpanded = false;
 
   late StreamSubscription<QuerySnapshot> _assignmentsSubscription;
   late StreamSubscription<QuerySnapshot> _announcementsSubscription;
@@ -92,56 +97,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _initMonth();
     _loadLastSeenTime();
     _loadInitialData();
-    _setupOneSignal();
-  }
-
-  // ✅ ==================== ONESIGNAL SETUP ====================
-  void _setupOneSignal() {
-    OneSignal.Notifications.addClickListener((event) {
-      print("📱 Notification clicked: ${event.notification.title}");
-      final additionalData = event.notification.additionalData;
-      final type = additionalData?['type'];
-      
-      if (type == 'announcement') {
-        print("📢 Navigate to Announcements");
-        setState(() => _selectedIndex = 2);
-      } else if (type == 'assignment') {
-        print("🎵 Navigate to Schedule/Assignments");
-        setState(() => _selectedIndex = 0);
-      }
-    });
-    print("✅ OneSignal listener setup complete for DashboardScreen");
-  }
-
-  // ✅ ==================== SEND PUSH NOTIFICATION ====================
-  Future<void> _sendPushNotification(String title, String message, String type) async {
-    const String appId = "6eed93c0-d444-4990-9c6d-cc151a557578";
-    const String apiKey = "os_v2_app_n3wzhqguirezbhdnzqkruvlvpccdd4gdjw5e3onkmjwi2cdilvitmvr4euh7gcwac45ofj3dyk6or6mn5jwqexc5esk5xnlkrdu3tgy";
-    
-    try {
-      final response = await http.post(
-        Uri.parse('https://onesignal.com/api/v1/notifications'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Basic $apiKey',
-        },
-        body: jsonEncode({
-          'app_id': appId,
-          'headings': {'en': title},
-          'contents': {'en': message},
-          'data': {'type': type},
-          'included_segments': ['All'],
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        print("✅ Push notification sent successfully: $title");
-      } else {
-        print("❌ Failed to send notification: ${response.body}");
-      }
-    } catch (e) {
-      print("❌ Error sending notification: $e");
-    }
   }
 
   void _initMonth() {
@@ -193,7 +148,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  // ----- Refresh all data manually (pull-to-refresh) -----
   Future<void> _refreshData() async {
     await _monthlyAssignmentSubscription.cancel();
     await _loadUserProfile();
@@ -202,7 +156,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {});
   }
 
-  // ----- Create announcement when lineup is saved/updated -----
+  // ✅ Updated: Send push to members (worship leaders), music directors and admins
   Future<void> _createLineupUpdateAnnouncement(String date, String action) async {
     final user = FirebaseAuth.instance.currentUser;
     String userName = _currentUserName;
@@ -214,12 +168,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       } catch (e) {}
     }
+    
+    // Create Firestore announcement
     await FirebaseFirestore.instance.collection('announcements').add({
       'title': '📝 Lineup ${action == 'created' ? 'Created' : 'Updated'}',
       'content': '$userName has ${action == 'created' ? 'created' : 'updated'} the lineup for $date.',
       'createdAt': FieldValue.serverTimestamp(),
       'createdBy': userName,
     });
+
+    // ✅ Send push notification to members (worship leaders)
+    await NotificationService.sendToRole(
+      role: 'member',
+      title: "📝 Lineup ${action == 'created' ? 'Created' : 'Updated'}",
+      message: "$userName has $action the lineup for $date",
+      data: {'type': 'lineup', 'dateKey': date},
+    );
+    
+    await NotificationService.sendToRole(
+      role: 'music_director',
+      title: "📝 Lineup ${action == 'created' ? 'Created' : 'Updated'}",
+      message: "$userName has $action the lineup for $date",
+      data: {'type': 'lineup', 'dateKey': date},
+    );
+    
+    await NotificationService.sendToRole(
+      role: 'admin',
+      title: "📝 Lineup ${action == 'created' ? 'Created' : 'Updated'}",
+      message: "$userName has $action the lineup for $date",
+      data: {'type': 'lineup', 'dateKey': date},
+    );
+  }
+
+  // ✅ Send push when lineup is sealed
+  Future<void> _sendSealedNotification(String date, String userName) async {
+    await NotificationService.sendToRole(
+      role: 'member',
+      title: "🔒 Lineup Sealed",
+      message: "$userName's lineup for $date has been sealed",
+      data: {'type': 'lineup_sealed', 'dateKey': date},
+    );
+    
+    await NotificationService.sendToRole(
+      role: 'music_director',
+      title: "🔒 Lineup Sealed",
+      message: "$userName's lineup for $date has been sealed",
+      data: {'type': 'lineup_sealed', 'dateKey': date},
+    );
+    
+    await NotificationService.sendToRole(
+      role: 'admin',
+      title: "🔒 Lineup Sealed",
+      message: "$userName's lineup for $date has been sealed",
+      data: {'type': 'lineup_sealed', 'dateKey': date},
+    );
   }
 
   void _listenToMonthlyBandAssignment() {
@@ -297,14 +299,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return result;
   }
 
+  // ✅ Auto‑seal after 5 days or when the assigned Sunday arrives + send push
   void _autoSealExpiredAssignments(List<ScheduleDisplayForMember> schedules) {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+
     for (var s in schedules) {
       if (s.status == 'proposed' && s.sendDate != null && _isCurrentUser(s)) {
-        final daysSinceSend = DateTime.now().difference(s.sendDate!.toDate()).inDays;
-        if (daysSinceSend >= 5) {
+        final daysSinceSend = now.difference(s.sendDate!.toDate()).inDays;
+        final bool timeExpired = daysSinceSend >= 5;
+        final DateTime? assignmentDate = DateTime.tryParse(s.dateKey);
+        final bool dateReached = assignmentDate != null &&
+            (assignmentDate.isBefore(today) || assignmentDate == today);
+
+        if (timeExpired || dateReached) {
           FirebaseFirestore.instance.collection('assignments').doc(s.id).update({
             'status': 'sealed',
           });
+          _sendSealedNotification(s.date, _currentUserName);
+          NotificationService.sendToUser(
+            userId: _currentUserId,
+            title: "🔒 Lineup Sealed",
+            message: "Your lineup for ${s.date} has been sealed and cannot be edited.",
+            data: {'type': 'lineup', 'dateKey': s.dateKey},
+          );
         }
       }
     }
@@ -359,7 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           id: doc.id,
           title: data['title'] ?? '',
           content: data['content'] ?? '',
-          createdAt: (data['createdAt'] as Timestamp).toDate(),
+          createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(), // ✅ fixed null safety
           createdBy: data['createdBy'] ?? '',
         );
       }).toList();
@@ -380,7 +398,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       barrierDismissible: true,
       builder: (context) => Dialog(
-        backgroundColor: licorice,
+        backgroundColor: almostBlack,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Container(
           padding: const EdgeInsets.all(20),
@@ -393,16 +411,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: const Icon(Icons.notifications_active, color: highlightSuccess, size: 32),
               ),
               const SizedBox(height: 16),
-              const Text('New Announcement', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text('New Announcement', style: TextStyle(color: primaryWhite, fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text(announcement.title, style: TextStyle(color: chamoisee, fontSize: 16, fontWeight: FontWeight.w600)),
+              Text(announcement.title, style: TextStyle(color: lightGrey, fontSize: 16, fontWeight: FontWeight.w600)),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: smokyBlack.withOpacity(0.5), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: primaryBlack.withOpacity(0.5), borderRadius: BorderRadius.circular(12)),
                 child: Text(
                   announcement.content.length > 100 ? '${announcement.content.substring(0, 100)}...' : announcement.content,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  style: TextStyle(color: primaryWhite.withOpacity(0.7), fontSize: 13),
                 ),
               ),
               const SizedBox(height: 16),
@@ -411,7 +429,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(side: BorderSide(color: kobicha)),
+                      style: OutlinedButton.styleFrom(side: BorderSide(color: mediumGrey)),
                       child: const Text('Later'),
                     ),
                   ),
@@ -498,19 +516,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return schedule.userId == _currentUserId || schedule.email.toLowerCase() == _currentUserEmail.toLowerCase();
   }
 
+  bool _isAssigned(ScheduleDisplayForMember schedule) {
+    return schedule.userId.isNotEmpty && schedule.name != 'Not Assigned';
+  }
+
   Future<void> _declineSchedule(String dateKey, String date, String name) async {
     bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: licorice,
+        backgroundColor: almostBlack,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Decline Schedule', style: TextStyle(color: chamoisee, fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to decline your assignment as Worship Leader on $date?', style: const TextStyle(color: Colors.white)),
+        title: Text('Decline Schedule', style: TextStyle(color: lightGrey, fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to decline your assignment as Worship Leader on this date?', style: TextStyle(color: primaryWhite)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: chamoisee))),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: mediumGrey))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: highlightError, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: highlightError, foregroundColor: primaryWhite),
             child: const Text('Yes, Decline'),
           ),
         ],
@@ -533,6 +555,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SnackBar(content: Text('You declined the schedule on $date'), backgroundColor: highlightWarning, duration: const Duration(seconds: 3)),
         );
       }
+      await NotificationService.sendToRole(
+        role: 'music_director',
+        title: "⚠️ Schedule Declined",
+        message: "$_currentUserName declined the assignment as Worship Leader on $date",
+        data: {'type': 'schedule', 'dateKey': dateKey},
+      );
+      await NotificationService.sendToRole(
+        role: 'admin',
+        title: "⚠️ Schedule Declined",
+        message: "$_currentUserName declined the assignment as Worship Leader on $date",
+        data: {'type': 'schedule', 'dateKey': dateKey},
+      );
+      await NotificationService.sendToRole(
+        role: 'member',
+        title: "⚠️ Schedule Declined",
+        message: "$_currentUserName declined the assignment as Worship Leader on $date",
+        data: {'type': 'schedule', 'dateKey': dateKey},
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -542,7 +582,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ========================= LINEUP DIALOG =========================
   void _showLineupDialog(ScheduleDisplayForMember schedule) {
     bool isOwner = _isCurrentUser(schedule);
     bool isSealed = schedule.status == 'sealed';
@@ -557,8 +596,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      isDismissible: false,
-      enableDrag: false,
+      isDismissible: true,
+      enableDrag: true,
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
@@ -569,7 +608,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [smokyBlack, blackBean, kobicha],
+                  colors: [primaryBlack, almostBlack, darkSmoke],
                 ),
                 borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
               ),
@@ -579,7 +618,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     margin: const EdgeInsets.only(top: 12),
                     width: 40,
                     height: 4,
-                    decoration: BoxDecoration(color: chamoisee, borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(color: mediumGrey, borderRadius: BorderRadius.circular(2)),
                   ),
                   const SizedBox(height: 16),
                   Padding(
@@ -588,17 +627,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         Container(
                           padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(color: kobicha.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
-                          child: Icon(isSealed ? Icons.lock : Icons.edit_note, color: chamoisee, size: 24),
+                          decoration: BoxDecoration(color: darkSmoke.withOpacity(0.5), borderRadius: BorderRadius.circular(12)),
+                          child: Icon(isSealed ? Icons.lock : Icons.edit_note, color: lightGrey, size: 24),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(schedule.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                              Text(schedule.date, style: TextStyle(color: chamoisee, fontSize: 14)),
-                              Text(schedule.time, style: TextStyle(color: chamoisee.withOpacity(0.7), fontSize: 12)),
+                              Text(schedule.name, style: const TextStyle(color: primaryWhite, fontSize: 18, fontWeight: FontWeight.bold)),
+                              Text(schedule.date, style: TextStyle(color: lightGrey, fontSize: 14)),
+                              Text(schedule.time, style: TextStyle(color: mediumGrey, fontSize: 12)),
                             ],
                           ),
                         ),
@@ -626,7 +665,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Song Line Up', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                          const Text('Song Line Up', style: TextStyle(color: primaryWhite, fontSize: 14, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 8),
                           if (showInputField)
                             _buildEditableTextField(controller: songsController, hint: 'Enter songs, links, notes...', maxLines: 12)
@@ -634,7 +673,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             _buildReadOnlyContent(context, hasContent: hasContent, content: schedule.notepadContent),
                           if (isOwner && !isSealed) ...[
                             const SizedBox(height: 16),
-                            const Text('Additional Notes', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                            const Text('Additional Notes', style: TextStyle(color: primaryWhite, fontSize: 14, fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
                             if (showInputField)
                               _buildEditableTextField(controller: notesController, hint: 'Add service notes...', maxLines: 3)
@@ -642,7 +681,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               _buildReadOnlyContent(context, hasContent: schedule.notes.isNotEmpty, content: schedule.notes, isNotes: true),
                           ] else if (!isOwner && schedule.notes.isNotEmpty) ...[
                             const SizedBox(height: 16),
-                            const Text('Notes', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                            const Text('Notes', style: TextStyle(color: primaryWhite, fontSize: 14, fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
                             _buildReadOnlyContent(context, hasContent: true, content: schedule.notes, isNotes: true),
                           ],
@@ -673,7 +712,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Expanded(
                             child: OutlinedButton(
                               onPressed: () => Navigator.pop(context),
-                              style: OutlinedButton.styleFrom(side: BorderSide(color: kobicha)),
+                              style: OutlinedButton.styleFrom(side: BorderSide(color: mediumGrey)),
                               child: const Text('Close'),
                             ),
                           ),
@@ -713,11 +752,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             'sendDate': Timestamp.now(),
                           });
                           await _createLineupUpdateAnnouncement(schedule.date, 'created');
-                          await _sendPushNotification(
-                            '📝 Lineup Created',
-                            '$_currentUserName created the lineup for ${schedule.date}',
-                            'assignment',
-                          );
                           if (mounted) Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Lineup saved! 5‑day clock started.'), backgroundColor: highlightSuccess),
@@ -741,7 +775,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   notesController.text = schedule.notes;
                                 });
                               },
-                              style: OutlinedButton.styleFrom(side: BorderSide(color: kobicha)),
+                              style: OutlinedButton.styleFrom(side: BorderSide(color: mediumGrey)),
                               child: const Text('Cancel'),
                             ),
                           ),
@@ -757,11 +791,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 schedule.notes = notesController.text;
                                 schedule.hasLineUp = songsController.text.isNotEmpty;
                                 await _createLineupUpdateAnnouncement(schedule.date, 'updated');
-                                await _sendPushNotification(
-                                  '📝 Lineup Updated',
-                                  '$_currentUserName updated the lineup for ${schedule.date}',
-                                  'assignment',
-                                );
                                 setSheetState(() {
                                   isEditMode = false;
                                 });
@@ -798,7 +827,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       padding: const EdgeInsets.all(20),
                       child: ElevatedButton(
                         onPressed: () => Navigator.pop(context),
-                        style: ElevatedButton.styleFrom(backgroundColor: kobicha, minimumSize: const Size(double.infinity, 48)),
+                        style: ElevatedButton.styleFrom(backgroundColor: mediumGrey, minimumSize: const Size(double.infinity, 48)),
                         child: const Text('Close'),
                       ),
                     ),
@@ -816,30 +845,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: smokyBlack.withOpacity(0.5),
+        color: primaryBlack.withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kobicha.withOpacity(0.5)),
+        border: Border.all(color: mediumGrey.withOpacity(0.5)),
       ),
       child: hasContent
           ? _buildClickableNotepadTextView(context, content)
-          : Center(child: Text(isNotes ? 'No notes added.' : 'No lineup yet.', style: TextStyle(color: chamoisee, fontSize: 12))),
+          : Center(child: Text(isNotes ? 'No notes added.' : 'No lineup yet.', style: TextStyle(color: mediumGrey, fontSize: 12))),
     );
   }
 
   Widget _buildEditableTextField({required TextEditingController controller, required String hint, required int maxLines}) {
     return Container(
       decoration: BoxDecoration(
-        color: smokyBlack.withOpacity(0.5),
+        color: primaryBlack.withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kobicha.withOpacity(0.5)),
+        border: Border.all(color: mediumGrey.withOpacity(0.5)),
       ),
       child: TextField(
         controller: controller,
         maxLines: maxLines,
-        style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.5),
+        style: const TextStyle(color: primaryWhite, fontSize: 12, height: 1.5),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.grey),
+          hintStyle: const TextStyle(color: mediumGrey),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.all(12),
         ),
@@ -865,7 +894,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ...parts.asMap().entries.map((entry) {
                   final part = entry.value;
                   if (part.isNotEmpty) {
-                    return Text(part, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.4));
+                    return Text(part, style: const TextStyle(color: primaryWhite, fontSize: 12, height: 1.4));
                   }
                   return const SizedBox.shrink();
                 }),
@@ -892,14 +921,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         } else if (line.contains('🎵') || line.contains('📝') || line.contains('✅')) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Text(line, style: TextStyle(color: chamoisee, fontSize: 12, fontWeight: FontWeight.w500)),
+            child: Text(line, style: TextStyle(color: lightGrey, fontSize: 12, fontWeight: FontWeight.w500)),
           );
         } else if (line.trim().isEmpty) {
           return const SizedBox(height: 6);
         } else {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Text(line, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.4)),
+            child: Text(line, style: const TextStyle(color: primaryWhite, fontSize: 12, height: 1.4)),
           );
         }
       }).toList(),
@@ -922,24 +951,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       height: 60,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(color: licorice.withOpacity(0.6), borderRadius: BorderRadius.circular(16), border: Border.all(color: kobicha, width: 1.5)),
+      decoration: BoxDecoration(color: darkSmoke.withOpacity(0.8), borderRadius: BorderRadius.circular(16), border: Border.all(color: mediumGrey, width: 1.5)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(icon: Icon(Icons.chevron_left, color: chamoisee), onPressed: _previousMonth, constraints: const BoxConstraints()),
-          Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(_currentMonth, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)), Text(_currentYear.toString(), style: const TextStyle(color: Colors.grey, fontSize: 12))]),
-          IconButton(icon: Icon(Icons.chevron_right, color: chamoisee), onPressed: _nextMonth, constraints: const BoxConstraints()),
+          IconButton(icon: Icon(Icons.chevron_left, color: lightGrey), onPressed: _previousMonth, constraints: const BoxConstraints()),
+          Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(_currentMonth, style: const TextStyle(color: primaryWhite, fontSize: 16, fontWeight: FontWeight.bold)), Text(_currentYear.toString(), style: const TextStyle(color: mediumGrey, fontSize: 12))]),
+          IconButton(icon: Icon(Icons.chevron_right, color: lightGrey), onPressed: _nextMonth, constraints: const BoxConstraints()),
         ],
       ),
     );
   }
 
-  // ==================== SCHEDULE TAB (with pull-to-refresh) ====================
   Widget _buildScheduleContent() {
     final schedules = _displaySchedules;
     return RefreshIndicator(
       onRefresh: _refreshData,
-      color: chamoisee,
+      color: lightGrey,
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -953,17 +981,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Sundays in $_currentMonth $_currentYear', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                Text('Tap card to view lineup', style: TextStyle(color: chamoisee, fontSize: 10)),
+                Text('Sundays in $_currentMonth $_currentYear', style: const TextStyle(color: primaryWhite, fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Tap card to view lineup', style: TextStyle(color: mediumGrey, fontSize: 10)),
               ],
             ),
             const SizedBox(height: 8),
             Expanded(
               child: schedules.isEmpty
                   ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.calendar_today, size: 60, color: chamoisee),
+                      Icon(Icons.calendar_today, size: 60, color: mediumGrey),
                       const SizedBox(height: 12),
-                      Text('No Sundays in $_currentMonth $_currentYear', style: TextStyle(color: chamoisee, fontSize: 14)),
+                      Text('No Sundays in $_currentMonth $_currentYear', style: TextStyle(color: mediumGrey, fontSize: 14)),
                     ]))
                   : ListView.builder(
                       itemCount: schedules.length,
@@ -976,7 +1004,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ==================== SCHEDULE CARD ====================
   Widget _buildScheduleCard(ScheduleDisplayForMember schedule) {
     final isCurrentUser = _isCurrentUser(schedule);
     final dayOfMonth = DateTime.tryParse(schedule.dateKey)?.day ?? 0;
@@ -984,7 +1011,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     Color statusColor;
     if (schedule.status == 'empty') {
       statusText = 'Empty';
-      statusColor = Colors.grey;
+      statusColor = mediumGrey;
     } else if (schedule.status == 'proposed') {
       if (schedule.sendDate != null) {
         final daysLeft = 5 - DateTime.now().difference(schedule.sendDate!.toDate()).inDays;
@@ -1001,8 +1028,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      color: isCurrentUser ? kobicha.withOpacity(0.15) : licorice.withOpacity(0.6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: lightGrey.withOpacity(0.5), width: 1),
+      ),
+      color: isCurrentUser ? darkSmoke.withOpacity(0.6) : almostBlack,
       child: InkWell(
         onTap: () => _showLineupDialog(schedule),
         borderRadius: BorderRadius.circular(14),
@@ -1013,11 +1043,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Container(
                 width: 48, height: 48,
                 decoration: BoxDecoration(
-                  color: isCurrentUser ? kobicha.withOpacity(0.3) : licorice.withOpacity(0.8),
+                  color: isCurrentUser ? mediumGrey.withOpacity(0.3) : darkSmoke,
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Center(
-                  child: Text(dayOfMonth.toString(), style: TextStyle(color: isCurrentUser ? chamoisee : Colors.white70, fontSize: 18, fontWeight: FontWeight.bold)),
+                  child: Text(dayOfMonth.toString(), style: TextStyle(color: isCurrentUser ? lightGrey : primaryWhite.withOpacity(0.7), fontSize: 18, fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1027,15 +1057,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Row(
                       children: [
-                        Text(schedule.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                        Text(
+                          schedule.name,
+                          style: TextStyle(
+                            color: _isAssigned(schedule) ? highlightSuccess : primaryWhite,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
                         if (isCurrentUser) ...[
                           const SizedBox(width: 6),
-                          Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kobicha.withOpacity(0.3), borderRadius: BorderRadius.circular(10)), child: Text('You', style: TextStyle(color: chamoisee, fontSize: 9))),
+                          Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: mediumGrey.withOpacity(0.3), borderRadius: BorderRadius.circular(10)), child: Text('You', style: TextStyle(color: lightGrey, fontSize: 9))),
                         ],
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(schedule.date, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                    Text(schedule.date, style: const TextStyle(color: mediumGrey, fontSize: 11)),
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1056,7 +1093,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: chamoisee, size: 22),
+              Icon(Icons.chevron_right, color: lightGrey, size: 22),
             ],
           ),
         ),
@@ -1064,11 +1101,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ==================== WORSHIP TEAM TAB (with pull-to-refresh) ====================
   Widget _buildTeamContent() {
     return RefreshIndicator(
       onRefresh: _refreshData,
-      color: chamoisee,
+      color: lightGrey,
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -1077,9 +1113,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 20),
             const Row(
               children: [
-                Icon(Icons.people, color: chamoisee, size: 24),
+                Icon(Icons.people, color: lightGrey, size: 24),
                 SizedBox(width: 8),
-                Text('Worship Team Members', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                Text('Worship Team Members', style: TextStyle(color: primaryWhite, fontSize: 18, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 16),
@@ -1089,9 +1125,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.people_outline, size: 64, color: chamoisee),
+                          Icon(Icons.people_outline, size: 64, color: mediumGrey),
                           const SizedBox(height: 16),
-                          Text('No members yet', style: TextStyle(color: chamoisee, fontSize: 16)),
+                          Text('No members yet', style: TextStyle(color: mediumGrey, fontSize: 16)),
                         ],
                       ),
                     )
@@ -1104,18 +1140,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: isCurrentUser ? kobicha.withOpacity(0.15) : licorice.withOpacity(0.6),
+                            color: isCurrentUser ? darkSmoke.withOpacity(0.6) : almostBlack,
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: isCurrentUser ? chamoisee : kobicha, width: isCurrentUser ? 1.5 : 1),
+                            border: Border.all(color: isCurrentUser ? lightGrey : mediumGrey, width: isCurrentUser ? 1.5 : 1),
                           ),
                           child: Row(
                             children: [
                               CircleAvatar(
-                                backgroundColor: kobicha,
+                                backgroundColor: mediumGrey,
                                 radius: 24,
                                 child: Text(
                                   member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
-                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                                  style: const TextStyle(color: primaryWhite, fontSize: 16),
                                 ),
                               ),
                               const SizedBox(width: 16),
@@ -1125,27 +1161,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   children: [
                                     Row(
                                       children: [
-                                        Text(member.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                                        Text(member.name, style: const TextStyle(color: primaryWhite, fontSize: 16, fontWeight: FontWeight.w600)),
                                         if (isCurrentUser) ...[
                                           const SizedBox(width: 8),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                            decoration: BoxDecoration(color: kobicha.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
-                                            child: Text('You', style: TextStyle(color: chamoisee, fontSize: 9)),
+                                            decoration: BoxDecoration(color: mediumGrey.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
+                                            child: Text('You', style: TextStyle(color: lightGrey, fontSize: 9)),
                                           ),
                                         ],
                                         if (member.isAdmin && !isCurrentUser) ...[
                                           const SizedBox(width: 8),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(color: chamoisee.withOpacity(0.3), borderRadius: BorderRadius.circular(8)),
-                                            child: Text('Admin', style: TextStyle(color: chamoisee, fontSize: 8)),
+                                            decoration: BoxDecoration(color: lightGrey.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+                                            child: Text('Admin', style: TextStyle(color: lightGrey, fontSize: 8)),
                                           ),
                                         ],
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    Text(member.email, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                    Text(member.email, style: const TextStyle(color: mediumGrey, fontSize: 12)),
                                   ],
                                 ),
                               ),
@@ -1167,12 +1203,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ==================== ANNOUNCEMENTS TAB (with pull-to-refresh) ====================
   Widget _buildUpdatesContent() {
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateLastSeenTime());
     return RefreshIndicator(
       onRefresh: _refreshData,
-      color: chamoisee,
+      color: lightGrey,
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -1184,16 +1219,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.notifications, color: chamoisee, size: 24),
+                    Icon(Icons.notifications, color: lightGrey, size: 24),
                     SizedBox(width: 8),
-                    Text('Announcements & Updates', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('Announcements & Updates', style: TextStyle(color: primaryWhite, fontSize: 18, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 if (_unreadCount > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(color: highlightError, borderRadius: BorderRadius.circular(20)),
-                    child: Text('$_unreadCount new', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    child: Text('$_unreadCount new', style: const TextStyle(color: primaryWhite, fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
               ],
             ),
@@ -1204,9 +1239,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.notifications_none, size: 64, color: chamoisee.withOpacity(0.5)),
+                          Icon(Icons.notifications_none, size: 64, color: mediumGrey),
                           const SizedBox(height: 16),
-                          Text('No announcements yet', style: TextStyle(color: chamoisee, fontSize: 16)),
+                          Text('No announcements yet', style: TextStyle(color: mediumGrey, fontSize: 16)),
                         ],
                       ),
                     )
@@ -1218,9 +1253,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           decoration: BoxDecoration(
-                            color: licorice.withOpacity(0.6),
+                            color: almostBlack,
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: isNew ? highlightSuccess : kobicha, width: isNew ? 2 : 1),
+                            border: Border.all(color: isNew ? highlightSuccess : mediumGrey, width: isNew ? 2 : 1),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1228,12 +1263,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Container(
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  color: kobicha.withOpacity(0.3),
+                                  color: darkSmoke.withOpacity(0.5),
                                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
                                 ),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.announcement, color: isNew ? highlightSuccess : chamoisee, size: 20),
+                                    Icon(Icons.announcement, color: isNew ? highlightSuccess : lightGrey, size: 20),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
@@ -1241,7 +1276,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         children: [
                                           Row(
                                             children: [
-                                              Expanded(child: Text(a.title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold))),
+                                              Expanded(child: Text(a.title, style: const TextStyle(color: primaryWhite, fontSize: 15, fontWeight: FontWeight.bold))),
                                               if (isNew)
                                                 Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1253,7 +1288,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           const SizedBox(height: 4),
                                           Text(
                                             'Posted by ${a.createdBy} • ${DateFormat('MMM d, yyyy').format(a.createdAt)}',
-                                            style: TextStyle(color: chamoisee.withOpacity(0.7), fontSize: 10),
+                                            style: TextStyle(color: lightGrey.withOpacity(0.7), fontSize: 10),
                                           ),
                                         ],
                                       ),
@@ -1264,15 +1299,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Container(
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  color: smokyBlack.withOpacity(0.3),
+                                  color: primaryBlack.withOpacity(0.3),
                                   borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.edit_note, color: chamoisee, size: 14),
+                                    Icon(Icons.edit_note, color: lightGrey, size: 14),
                                     const SizedBox(width: 10),
-                                    Expanded(child: Text(a.content, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4))),
+                                    Expanded(child: Text(a.content, style: TextStyle(color: primaryWhite.withOpacity(0.7), fontSize: 12, height: 1.4))),
                                   ],
                                 ),
                               ),
@@ -1288,46 +1323,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ==================== MUSICIAN SLOTS ====================
+  // ✅ FIXED OVERFLOW: Musician slots now scrollable when expanded
   Widget _buildMusicianSlots() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(color: licorice.withOpacity(0.6), borderRadius: BorderRadius.circular(16), border: Border.all(color: kobicha.withOpacity(0.5), width: 1)),
+      decoration: BoxDecoration(
+        color: darkSmoke.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: mediumGrey.withOpacity(0.5), width: 1),
+      ),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(children: [Icon(Icons.music_note, color: chamoisee, size: 16), const SizedBox(width: 6), const Text('Band Members for this Month', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500))]),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: _monthlyAssignedCount > 0 ? highlightSuccess.withOpacity(0.2) : highlightWarning.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-                child: Text('$_monthlyAssignedCount/${musicPositions.length} assigned', style: TextStyle(color: _monthlyAssignedCount > 0 ? highlightSuccess : highlightWarning, fontSize: 10)),
+          InkWell(
+            onTap: () {
+              setState(() {
+                _isMusicianListExpanded = !_isMusicianListExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(_isMusicianListExpanded ? Icons.expand_less : Icons.expand_more,
+                          color: lightGrey, size: 20),
+                      const SizedBox(width: 8),
+                      Icon(Icons.music_note, color: lightGrey, size: 16),
+                      const SizedBox(width: 6),
+                      const Text('Musicians of this Month',
+                          style: TextStyle(
+                              color: primaryWhite,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _monthlyAssignedCount > 0
+                          ? highlightSuccess.withOpacity(0.2)
+                          : highlightWarning.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$_monthlyAssignedCount/${musicPositions.length} assigned',
+                      style: TextStyle(
+                        color: _monthlyAssignedCount > 0 ? highlightSuccess : highlightWarning,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: musicPositions.map((position) {
-              String assignedName = 'Not Assigned';
-              Color textColor = Colors.grey;
-              if (_monthlyBandAssignment != null && _monthlyBandAssignment!.containsKey(position)) {
-                final musician = _monthlyBandAssignment![position]!;
-                if (musician.musicianId.isNotEmpty) {
-                  assignedName = musician.musicianName;
-                  textColor = highlightSuccess;
-                }
-              }
-              return Expanded(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  decoration: BoxDecoration(color: smokyBlack.withOpacity(0.5), borderRadius: BorderRadius.circular(10), border: Border.all(color: kobicha.withOpacity(0.3))),
-                  child: Column(children: [Text(position, style: TextStyle(color: chamoisee, fontSize: 9), textAlign: TextAlign.center), const SizedBox(height: 4), Text(assignedName, style: TextStyle(color: textColor, fontSize: 9), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis)]),
+          if (_isMusicianListExpanded)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 400),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    ...musicPositions.map((position) {
+                      String assignedName = 'Not Assigned';
+                      Color textColor = mediumGrey;
+                      if (_monthlyBandAssignment != null &&
+                          _monthlyBandAssignment!.containsKey(position)) {
+                        final musician = _monthlyBandAssignment![position]!;
+                        if (musician.musicianId.isNotEmpty) {
+                          assignedName = musician.musicianName;
+                          textColor = highlightSuccess;
+                        }
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: primaryBlack.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: mediumGrey.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(
+                                child: Text(position,
+                                    style: TextStyle(color: lightGrey, fontSize: 13),
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                              const SizedBox(width: 12),
+                              Flexible(
+                                child: Text(assignedName,
+                                    style: TextStyle(color: textColor, fontSize: 13,
+                                        fontWeight: FontWeight.w500),
+                                    textAlign: TextAlign.end,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 4),
+                  ],
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            ),
         ],
       ),
     );
@@ -1343,26 +1448,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(color: licorice.withOpacity(0.4), borderRadius: BorderRadius.circular(14), border: Border.all(color: kobicha.withOpacity(0.3))),
+      decoration: BoxDecoration(color: darkSmoke.withOpacity(0.6), borderRadius: BorderRadius.circular(14), border: Border.all(color: mediumGrey.withOpacity(0.3))),
       child: Row(
         children: [
           Container(
             width: 44,
             height: 44,
-            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [kobicha, chamoisee])),
+            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [mediumGrey, lightGrey])),
             child: ClipOval(
               child: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
-                  ? Image.network(_profileImageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Center(child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))))
-                  : Center(child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+                  ? Image.network(_profileImageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Center(child: Text(initials, style: const TextStyle(color: primaryBlack, fontWeight: FontWeight.bold, fontSize: 16))))
+                  : Center(child: Text(initials, style: const TextStyle(color: primaryBlack, fontWeight: FontWeight.bold, fontSize: 16))),
             ),
           ),
           const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_currentUserName, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+              Text(_currentUserName, style: const TextStyle(color: primaryWhite, fontSize: 14, fontWeight: FontWeight.w600)),
               const SizedBox(height: 2),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kobicha.withOpacity(0.3), borderRadius: BorderRadius.circular(10)), child: const Text('Worship Leader', style: TextStyle(color: chamoisee, fontSize: 9))),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: darkSmoke, borderRadius: BorderRadius.circular(10)), child: const Text('Worship Leader', style: TextStyle(color: lightGrey, fontSize: 9))),
             ],
           ),
         ],
@@ -1376,20 +1481,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       drawerInitials = _currentUserName[0].toUpperCase() + _currentUserName[_currentUserName.indexOf(' ') + 1].toUpperCase();
     }
     return Drawer(
-      backgroundColor: licorice,
+      backgroundColor: almostBlack,
       elevation: 16,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(topRight: Radius.circular(0), bottomRight: Radius.circular(0)),
       ),
       child: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [smokyBlack, blackBean, licorice]),
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [primaryBlack, almostBlack, darkSmoke]),
         ),
         child: Column(
           children: [
             Container(
               padding: const EdgeInsets.fromLTRB(20, 50, 20, 24),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: kobicha.withOpacity(0.5)))),
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: mediumGrey.withOpacity(0.5)))),
               child: Row(
                 children: [
                   Container(
@@ -1397,13 +1502,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     height: 60,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: const LinearGradient(colors: [kobicha, chamoisee]),
-                      border: Border.all(color: chamoisee, width: 2),
+                      gradient: const LinearGradient(colors: [mediumGrey, lightGrey]),
+                      border: Border.all(color: lightGrey, width: 2),
                     ),
                     child: ClipOval(
                       child: _profileImageUrl != null && _profileImageUrl!.isNotEmpty
                           ? Image.network(_profileImageUrl!, fit: BoxFit.cover)
-                          : Center(child: Text(drawerInitials, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold))),
+                          : Center(child: Text(drawerInitials, style: const TextStyle(color: primaryBlack, fontSize: 24, fontWeight: FontWeight.bold))),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -1411,12 +1516,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_currentUserName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                        Text(_currentUserName, style: const TextStyle(color: primaryWhite, fontSize: 18, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(color: kobicha.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
-                          child: const Text('Worship Leader', style: TextStyle(color: chamoisee, fontSize: 11)),
+                          decoration: BoxDecoration(color: darkSmoke, borderRadius: BorderRadius.circular(12)),
+                          child: const Text('Worship Leader', style: TextStyle(color: lightGrey, fontSize: 11)),
                         ),
                       ],
                     ),
@@ -1444,8 +1549,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   UserSession.userName = null;
                   UserSession.userEmail = null;
                   UserSession.userRole = null;
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.remove('userId');
+                  await prefs.remove('userRole');
+                  await prefs.remove('userName');
+                  await prefs.remove('userEmail');
+                  await prefs.remove('lastSeenAnnouncement');
                   if (mounted) {
-                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const AuthScreen()));
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (context) => const AuthScreen()),
+                    );
                   }
                 },
               ),
@@ -1460,12 +1574,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildDrawerItem({required IconData icon, required String title, required int index, required bool isSelected, String? badge}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: isSelected ? kobicha.withOpacity(0.3) : Colors.transparent, border: isSelected ? Border.all(color: chamoisee.withOpacity(0.5)) : null),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: isSelected ? darkSmoke : Colors.transparent, border: isSelected ? Border.all(color: lightGrey.withOpacity(0.5)) : null),
       child: ListTile(
-        leading: Icon(icon, color: isSelected ? chamoisee : Colors.grey),
-        title: Text(title, style: TextStyle(color: isSelected ? Colors.white : Colors.grey, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal)),
+        leading: Icon(icon, color: isSelected ? lightGrey : mediumGrey),
+        title: Text(title, style: TextStyle(color: isSelected ? primaryWhite : mediumGrey, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal)),
         trailing: badge != null
-            ? Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: highlightError, borderRadius: BorderRadius.circular(20)), child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)))
+            ? Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: highlightError, borderRadius: BorderRadius.circular(20)), child: Text(badge, style: const TextStyle(color: primaryWhite, fontSize: 11, fontWeight: FontWeight.bold)))
             : null,
         onTap: () {
           setState(() {
@@ -1480,7 +1594,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return Container(decoration: const BoxDecoration(image: DecorationImage(image: AssetImage('assets/music.png'), fit: BoxFit.cover)), child: const Center(child: CircularProgressIndicator(color: chamoisee)));
+      return Container(
+        color: primaryBlack,
+        child: const Center(child: CircularProgressIndicator(color: lightGrey)),
+      );
     }
     Widget body;
     switch (_selectedIndex) {
@@ -1503,7 +1620,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body = _buildScheduleContent();
     }
     return Container(
-      decoration: const BoxDecoration(image: DecorationImage(image: AssetImage('assets/music.png'), fit: BoxFit.cover)),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [primaryBlack, almostBlack, darkSmoke],
+        ),
+      ),
       child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: Colors.transparent,
@@ -1511,10 +1634,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           title: Text(_getAppBarTitle()),
           backgroundColor: Colors.transparent,
           elevation: 0,
-          foregroundColor: chamoisee,
+          foregroundColor: lightGrey,
           leading: Builder(
             builder: (context) => IconButton(
-              icon: const Icon(Icons.menu, color: chamoisee),
+              icon: const Icon(Icons.menu, color: lightGrey),
               onPressed: () {
                 Scaffold.of(context).openDrawer();
               },

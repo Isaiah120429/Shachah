@@ -1,4 +1,4 @@
-name: worship_team_app
+name: Shachah
 description: "Worship Team Management System - Schedule and Song List Manager"
 publish_to: 'none'
 version: 1.0.0+1
@@ -24,7 +24,7 @@ dependencies:
   cloud_firestore: ^5.5.0
   firebase_storage: ^12.3.0
 
-  # ✅ Push Notifications (OneSignal - replaces FCM)
+  # Push Notifications (OneSignal - replaces FCM)
   onesignal_flutter: ^5.2.5
 
   # Image Pickers
@@ -34,10 +34,17 @@ dependencies:
   # HTTP (keep for any API calls)
   http: ^1.3.0
 
+  # ✅ Custom Fonts for Splash Screen & App-wide typography
+  google_fonts: ^6.2.1
+
+  # ✅ Offline Support - Connectivity checking
+  connectivity_plus: ^6.1.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
@@ -45,6 +52,10 @@ flutter:
   assets:
     - assets/
     - assets/logoicon.png
-    - assets/notes.png
-    - assets/steps.png
-    - assets/music.png
+    - assets/SHACHAH.png
+    - assets/SHACHAHS.png
+    - assets/head.jpg
+
+flutter_icons:
+  android: true
+  image_path: "assets/SHACHAHS.png"

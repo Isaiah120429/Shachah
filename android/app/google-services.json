@@ -8,38 +8,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:616124787110:android:4d70e1ebdf30a9a23d0767",
+        "mobilesdk_app_id": "1:616124787110:android:2bf153f8a42cf4d23d0767",
         "android_client_info": {
-          "package_name": "com.example.worshipteam"
-        }
-      },
-      "oauth_client": [
-        {
-          "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDjHiGKiW7736cpQUIf98roKcKHUojXhIk"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "616124787110-fqq5uh9gtkcarmr9h8cvpvbaq5m1utd0.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:616124787110:android:7de801276128905a3d0767",
-        "android_client_info": {
-          "package_name": "com.example.worshipteamapp"
+          "package_name": "worship.com"
         }
       },
       "oauth_client": [
